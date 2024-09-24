@@ -1,5 +1,5 @@
 const App = () => {
-  return <div>test</div>;
+  return <div>App ver: {APP_VERSION}</div>;
 };
 
 export default App;
