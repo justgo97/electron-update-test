@@ -37,10 +37,16 @@ interface IUpdateElectronAppOptions {
   readonly updateInterval?: string;
 
   /**
-   * @param {Boolean} notifyUser Defaults to `true`.  When enabled the user will be
+   * @param {Boolean} notifyBeforeApply Defaults to `true`.  When enabled the user will be
    *                             prompted to apply the update immediately after download.
    */
   readonly notifyBeforeApply?: boolean;
+
+  /**
+   * @param {Boolean} notifyBeforeDownload Defaults to `true`.  When enabled the user will be
+   *                             prompted to whether start downloading the update or not.
+   */
+  readonly notifyBeforeDownload?: boolean;
 }
 
 //const supportedPlatforms = ["darwin", "win32"];
@@ -51,9 +57,11 @@ class InlineUpdaterClass {
   fetchedVersion: string = "0.0.0";
 
   notifyBeforeApply: boolean;
+  notifyBeforeDownload: boolean;
 
   async setup(opts?: IUpdateElectronAppOptions) {
     const electronApp = electron.app;
+
     // check for bad input early, so it will be logged during development
     const safeOpts = this.validateInput(opts, electronApp);
 
@@ -71,33 +79,44 @@ class InlineUpdaterClass {
       return false;
     }
 
-    /*
-    const feedURL = `${safeOpts.user}/${safeOpts.repo}/${process.platform}-${
-      process.arch
-    }/${electronApp.getVersion()}`;
-    */
-
     const downloadUrl = await this.fetchDownloadUrl(
       safeOpts.user,
       safeOpts.repo
     );
+
+    if (!downloadUrl) {
+      return false;
+    }
 
     this.hasLatestVersion = semver.lte(
       electronApp.getVersion(),
       this.fetchedVersion
     );
 
-    if (downloadUrl) {
-      if (electronApp.isReady())
-        this.initUpdater(electron.autoUpdater, downloadUrl);
-      else
-        electronApp.on("ready", () =>
-          this.initUpdater(electron.autoUpdater, downloadUrl)
-        );
-      return true;
+    if (this.hasLatestVersion) {
+      console.log(`App has the lastest version(${this.fetchedVersion})`);
+    } else {
+      if (this.notifyBeforeDownload) {
+        const dialogOpts: MessageBoxOptions = {
+          type: "info",
+          buttons: ["Yes", "Later"],
+          title: "Application Update",
+          message: this.fetchedVersion,
+          detail:
+            "A new version can be downloaded. Would you like to start downloading in background?",
+        };
+
+        dialog.showMessageBox(dialogOpts).then(({ response }) => {
+          if (response === 0) {
+            this.initUpdater(downloadUrl);
+          }
+        });
+      } else {
+        this.initUpdater(downloadUrl);
+      }
     }
 
-    return false;
+    return true;
   }
 
   private validateInput(
@@ -191,44 +210,59 @@ class InlineUpdaterClass {
     }
   }
 
-  private initUpdater(
+  private initUpdater(downloadUrl: string) {
+    const electronApp = electron.app;
+    if (electronApp.isReady())
+      this.setUpdaterDownloadUrl(electron.autoUpdater, downloadUrl);
+    else
+      electronApp.on("ready", () =>
+        this.setUpdaterDownloadUrl(electron.autoUpdater, downloadUrl)
+      );
+  }
+
+  private setUpdaterDownloadUrl(
     electronUpdater: Electron.AutoUpdater,
     downloadUrl: string
   ) {
-    console.log(downloadUrl);
+    console.log("UpdateUrl: ", downloadUrl);
 
     electronUpdater.setFeedURL({ url: downloadUrl });
 
     if (this.notifyBeforeApply) {
-      electronUpdater.on(
-        "update-downloaded",
-        (event, releaseNotes, releaseName, releaseDate, updateURL) => {
-          console.log("update-downloaded", [
-            event,
-            releaseNotes,
-            releaseName,
-            releaseDate,
-            updateURL,
-          ]);
-
-          const dialogOpts: MessageBoxOptions = {
-            type: "info",
-            buttons: ["Restart", "Later"],
-            title: "Application Update",
-            message: process.platform === "win32" ? releaseNotes : releaseName,
-            detail:
-              "A new version has been downloaded. Restart the application to apply the updates.",
-          };
-
-          dialog.showMessageBox(dialogOpts).then(({ response }) => {
-            if (response === 0) electronUpdater.quitAndInstall();
-          });
-        }
-      );
+      electronUpdater.on("update-downloaded", this.onUpdateDownloaded);
     }
 
     return true;
   }
+
+  private onUpdateDownloaded = (
+    event: Electron.Event,
+    releaseNotes: string,
+    releaseName: string,
+    releaseDate: Date,
+    updateURL: string
+  ) => {
+    console.log("update-downloaded", [
+      event,
+      releaseNotes,
+      releaseName,
+      releaseDate,
+      updateURL,
+    ]);
+
+    const dialogOpts: MessageBoxOptions = {
+      type: "info",
+      buttons: ["Restart", "Later"],
+      title: "Application Update",
+      message: process.platform === "win32" ? releaseNotes : releaseName,
+      detail:
+        "A new version has been downloaded. Restart the application to apply the updates.",
+    };
+
+    dialog.showMessageBox(dialogOpts).then(({ response }) => {
+      if (response === 0) electron.autoUpdater.quitAndInstall();
+    });
+  };
 }
 
 const inlineUpdater = new InlineUpdaterClass();
