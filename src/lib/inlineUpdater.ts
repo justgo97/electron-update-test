@@ -110,7 +110,7 @@ class InlineUpdaterClass {
       return false;
     }
 
-    this.hasLatestVersion = semver.lte(
+    this.hasLatestVersion = semver.gte(
       electronApp.getVersion(),
       this.fetchedVersion
     );
