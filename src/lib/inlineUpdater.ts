@@ -55,11 +55,21 @@ const supportedPlatforms = ["win32"];
 class InlineUpdaterClass {
   hasLatestVersion = true;
   fetchedVersion: string = "0.0.0";
-
+  updateInterval: string;
   notifyBeforeApply: boolean;
   notifyBeforeDownload: boolean;
+  pauseUpdates: boolean;
 
-  async setup(opts?: IUpdateElectronAppOptions) {
+  setup(opts?: IUpdateElectronAppOptions) {
+    const electronApp = electron.app;
+
+    if (electronApp.isReady()) this.onAppReady(opts);
+    else electronApp.on("ready", () => this.onAppReady(opts));
+
+    return true;
+  }
+
+  private async onAppReady(opts?: IUpdateElectronAppOptions) {
     const electronApp = electron.app;
 
     // check for bad input early, so it will be logged during development
@@ -95,28 +105,14 @@ class InlineUpdaterClass {
 
     if (this.hasLatestVersion) {
       console.log(`App has the lastest version(${this.fetchedVersion})`);
-    } else {
-      if (this.notifyBeforeDownload) {
-        const dialogOpts: MessageBoxOptions = {
-          type: "info",
-          buttons: ["Yes", "Later"],
-          title: "Application Update",
-          message: this.fetchedVersion,
-          detail:
-            "A new version can be downloaded. Would you like to start downloading in background?",
-        };
-
-        dialog.showMessageBox(dialogOpts).then(({ response }) => {
-          if (response === 0) {
-            this.initUpdater(downloadUrl);
-          }
-        });
-      } else {
-        this.initUpdater(downloadUrl);
-      }
+      return true;
     }
 
-    return true;
+    if (this.notifyBeforeDownload) {
+      this.promptDownload(downloadUrl);
+    } else {
+      this.initUpdater(downloadUrl);
+    }
   }
 
   private validateInput(
@@ -128,23 +124,24 @@ class InlineUpdaterClass {
     const repo = opts?.repo || pgkRepo.repo;
     const user = opts?.user || pgkRepo.user;
 
-    const updateInterval = opts?.updateInterval || "10 minutes";
+    this.updateInterval = opts?.updateInterval || "10 minutes";
 
     this.notifyBeforeApply = opts?.notifyBeforeApply || false;
 
     assert(repo, "repo is required");
 
     assert(
-      typeof updateInterval === "string" && updateInterval.match(/^\d+/),
+      typeof this.updateInterval === "string" &&
+        this.updateInterval.match(/^\d+/),
       "updateInterval must be a human-friendly string interval like `20 minutes`"
     );
 
     assert(
-      ms(updateInterval) >= 5 * 60 * 1000,
+      ms(this.updateInterval) >= 5 * 60 * 1000,
       "updateInterval must be `5 minutes` or more"
     );
 
-    return { user, repo, updateInterval };
+    return { user, repo };
   }
 
   private guessRepo(appPath: string) {
@@ -210,23 +207,36 @@ class InlineUpdaterClass {
     }
   }
 
-  private initUpdater(downloadUrl: string) {
-    const electronApp = electron.app;
-    if (electronApp.isReady())
-      this.setUpdaterDownloadUrl(electron.autoUpdater, downloadUrl);
-    else
-      electronApp.on("ready", () =>
-        this.setUpdaterDownloadUrl(electron.autoUpdater, downloadUrl)
-      );
+  private promptDownload(downloadUrl: string) {
+    const dialogOpts: MessageBoxOptions = {
+      type: "info",
+      buttons: ["Yes", "Later"],
+      title: "Application Update",
+      message: this.fetchedVersion,
+      detail:
+        "A new version can be downloaded. Would you like to start downloading in background?",
+    };
+
+    dialog.showMessageBox(dialogOpts).then(({ response }) => {
+      if (response === 0) {
+        this.initUpdater(downloadUrl);
+      } else {
+        this.pauseUpdates = true;
+      }
+    });
   }
 
-  private setUpdaterDownloadUrl(
-    electronUpdater: Electron.AutoUpdater,
-    downloadUrl: string
-  ) {
+  private initUpdater(downloadUrl: string) {
+    const electronUpdater = electron.autoUpdater;
     console.log("UpdateUrl: ", downloadUrl);
 
     electronUpdater.setFeedURL({ url: downloadUrl });
+
+    electronUpdater.checkForUpdates();
+    setInterval(() => {
+      if (!this.hasLatestVersion && !this.pauseUpdates)
+        electronUpdater.checkForUpdates();
+    }, ms(this.updateInterval));
 
     if (this.notifyBeforeApply) {
       electronUpdater.on("update-downloaded", this.onUpdateDownloaded);
