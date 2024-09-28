@@ -59,6 +59,9 @@ class InlineUpdaterClass {
   notifyBeforeApply: boolean;
   notifyBeforeDownload: boolean;
   pauseUpdates: boolean;
+  private downloadUrl: string;
+  private user: string;
+  private repo: string;
 
   setup(opts?: IUpdateElectronAppOptions) {
     const electronApp = electron.app;
@@ -73,7 +76,7 @@ class InlineUpdaterClass {
     const electronApp = electron.app;
 
     // check for bad input early, so it will be logged during development
-    const safeOpts = this.validateInput(opts, electronApp);
+    this.validateInput(opts, electronApp);
 
     // don't attempt to update during development
     if (!electronApp.isPackaged) {
@@ -89,12 +92,21 @@ class InlineUpdaterClass {
       return false;
     }
 
-    const downloadUrl = await this.fetchDownloadUrl(
-      safeOpts.user,
-      safeOpts.repo
-    );
+    await this.checkVersionDelta();
 
-    if (!downloadUrl) {
+    if (this.notifyBeforeDownload) {
+      this.promptDownload();
+    } else {
+      this.initUpdater();
+    }
+  }
+
+  private async checkVersionDelta() {
+    const electronApp = electron.app;
+
+    this.downloadUrl = await this.fetchDownloadUrl();
+
+    if (!this.downloadUrl) {
       return false;
     }
 
@@ -107,12 +119,6 @@ class InlineUpdaterClass {
       console.log(`App has the lastest version(${this.fetchedVersion})`);
       return true;
     }
-
-    if (this.notifyBeforeDownload) {
-      this.promptDownload(downloadUrl);
-    } else {
-      this.initUpdater(downloadUrl);
-    }
   }
 
   private validateInput(
@@ -121,14 +127,14 @@ class InlineUpdaterClass {
   ) {
     const pgkRepo = this.guessRepo(electronApp.getAppPath());
 
-    const repo = opts?.repo || pgkRepo.repo;
-    const user = opts?.user || pgkRepo.user;
+    this.repo = opts?.repo || pgkRepo.repo;
+    this.user = opts?.user || pgkRepo.user;
 
     this.updateInterval = opts?.updateInterval || "10 minutes";
 
     this.notifyBeforeApply = opts?.notifyBeforeApply || false;
 
-    assert(repo, "repo is required");
+    assert(this.repo, "repo is required");
 
     assert(
       typeof this.updateInterval === "string" &&
@@ -140,8 +146,6 @@ class InlineUpdaterClass {
       ms(this.updateInterval) >= 5 * 60 * 1000,
       "updateInterval must be `5 minutes` or more"
     );
-
-    return { user, repo };
   }
 
   private guessRepo(appPath: string) {
@@ -161,8 +165,8 @@ class InlineUpdaterClass {
     }
   }
 
-  private async fetchDownloadUrl(user: string, repo: string) {
-    const apiUrl = `https://api.github.com/repos/${user}/${repo}/releases?per_page=100`;
+  private async fetchDownloadUrl() {
+    const apiUrl = `https://api.github.com/repos/${this.user}/${this.repo}/releases?per_page=100`;
     const headers = { Accept: "application/vnd.github.preview" };
 
     try {
@@ -207,7 +211,7 @@ class InlineUpdaterClass {
     }
   }
 
-  private promptDownload(downloadUrl: string) {
+  private promptDownload() {
     const dialogOpts: MessageBoxOptions = {
       type: "info",
       buttons: ["Yes", "Later"],
@@ -219,23 +223,29 @@ class InlineUpdaterClass {
 
     dialog.showMessageBox(dialogOpts).then(({ response }) => {
       if (response === 0) {
-        this.initUpdater(downloadUrl);
+        this.initUpdater();
       } else {
         this.pauseUpdates = true;
       }
     });
   }
 
-  private initUpdater(downloadUrl: string) {
+  private initUpdater() {
     const electronUpdater = electron.autoUpdater;
-    console.log("UpdateUrl: ", downloadUrl);
+    console.log("UpdateUrl: ", this.downloadUrl);
 
-    electronUpdater.setFeedURL({ url: downloadUrl });
+    electronUpdater.setFeedURL({ url: this.downloadUrl });
 
     electronUpdater.checkForUpdates();
     setInterval(() => {
-      if (!this.hasLatestVersion && !this.pauseUpdates)
-        electronUpdater.checkForUpdates();
+      if (this.pauseUpdates) return;
+
+      if (this.hasLatestVersion) {
+        this.checkVersionDelta();
+        return;
+      }
+
+      electronUpdater.checkForUpdates();
     }, ms(this.updateInterval));
 
     if (this.notifyBeforeApply) {
