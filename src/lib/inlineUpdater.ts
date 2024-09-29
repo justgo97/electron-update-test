@@ -197,7 +197,8 @@ class InlineUpdaterClass {
 
         if (nupkgAsset) {
           this.fetchedVersion = release.tag_name;
-          return nupkgAsset.browser_download_url;
+          console.log("release.tag_name: ", release.tag_name);
+          return `https://github.com/${this.user}/${this.repo}/releases/download/${release.tag_name}/RELEASES`;
         }
       }
     } catch (error: any) {
@@ -235,6 +236,14 @@ class InlineUpdaterClass {
     console.log("UpdateUrl: ", this.downloadUrl);
 
     electronUpdater.setFeedURL({ url: this.downloadUrl });
+
+    /*
+    if (this.pauseUpdates) return;
+
+    if (this.hasLatestVersion) {
+      return;
+    }
+      */
 
     electronUpdater.checkForUpdates();
     setInterval(() => {
