@@ -237,13 +237,11 @@ class InlineUpdaterClass {
 
     electronUpdater.setFeedURL({ url: this.downloadUrl });
 
-    /*
     if (this.pauseUpdates) return;
 
     if (this.hasLatestVersion) {
       return;
     }
-      */
 
     electronUpdater.checkForUpdates();
     setInterval(() => {
