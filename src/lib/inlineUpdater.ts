@@ -23,30 +23,30 @@ interface IUpdateElectronAppOptions {
   /**
    * @param {String} user A GitHub user account identifier.
    */
-  readonly user?: string;
+  user?: string;
 
   /**
    * @param {String} repo A GitHub repository identifier.
    */
-  readonly repo?: string;
+  repo?: string;
 
   /**
    * @param {String} updateInterval How frequently to check for updates. Defaults to `10 minutes`.
    *                                Minimum allowed interval is `5 minutes`.
    */
-  readonly updateInterval?: string;
+  updateInterval?: string;
 
   /**
    * @param {Boolean} notifyBeforeApply Defaults to `true`.  When enabled the user will be
    *                             prompted to apply the update immediately after download.
    */
-  readonly notifyBeforeApply?: boolean;
+  notifyBeforeApply?: boolean;
 
   /**
    * @param {Boolean} notifyBeforeDownload Defaults to `true`.  When enabled the user will be
    *                             prompted to whether start downloading the update or not.
    */
-  readonly notifyBeforeDownload?: boolean;
+  notifyBeforeDownload?: boolean;
 }
 
 const supportedPlatforms = ["darwin", "win32"];
@@ -54,28 +54,58 @@ const supportedPlatforms = ["darwin", "win32"];
 class InlineUpdaterClass {
   hasLatestVersion = true;
   fetchedVersion: string = "0.0.0";
-  updateInterval: string;
-  notifyBeforeApply: boolean;
-  notifyBeforeDownload: boolean;
   pauseUpdates: boolean;
   private downloadUrl: string;
-  private user: string;
-  private repo: string;
+
+  options: IUpdateElectronAppOptions = {
+    updateInterval: "10 minutes",
+    notifyBeforeApply: true,
+    notifyBeforeDownload: true,
+  };
 
   setup(opts?: IUpdateElectronAppOptions) {
     const electronApp = electron.app;
 
-    if (electronApp.isReady()) this.onAppReady(opts);
-    else electronApp.on("ready", () => this.onAppReady(opts));
+    this.validateInput(opts, electronApp);
+
+    if (electronApp.isReady()) this.onAppReady();
+    else electronApp.on("ready", () => this.onAppReady());
 
     return true;
   }
 
-  private onAppReady(opts?: IUpdateElectronAppOptions) {
-    const electronApp = electron.app;
+  private validateInput(
+    opts: IUpdateElectronAppOptions,
+    electronApp: typeof Electron.app
+  ) {
+    const pgkRepo = this.guessRepo(electronApp.getAppPath());
 
-    // check for bad input early, so it will be logged during development
-    this.validateInput(opts, electronApp);
+    this.options.repo = opts?.repo || pgkRepo.repo;
+    this.options.user = opts?.user || pgkRepo.user;
+
+    this.options.updateInterval =
+      opts?.updateInterval ?? this.options.updateInterval;
+    this.options.notifyBeforeApply =
+      opts?.notifyBeforeApply ?? this.options.notifyBeforeApply;
+    this.options.notifyBeforeDownload =
+      opts?.notifyBeforeDownload ?? this.options.notifyBeforeDownload;
+
+    assert(this.options.repo, "repo is required");
+
+    assert(
+      typeof this.options.updateInterval === "string" &&
+        this.options.updateInterval.match(/^\d+/),
+      "updateInterval must be a human-friendly string interval like `20 minutes`"
+    );
+
+    assert(
+      ms(this.options.updateInterval) >= 5 * 60 * 1000,
+      "updateInterval must be `5 minutes` or more"
+    );
+  }
+
+  private onAppReady() {
+    const electronApp = electron.app;
 
     // don't attempt to update during development
     if (!electronApp.isPackaged) {
@@ -92,45 +122,6 @@ class InlineUpdaterClass {
     }
 
     this.initUpdater();
-  }
-
-  private async checkVersionDelta() {
-    const electronApp = electron.app;
-
-    this.downloadUrl = await this.fetchDownloadUrl();
-
-    if (!this.downloadUrl) {
-      return false;
-    }
-
-    return semver.gte(electronApp.getVersion(), this.fetchedVersion);
-  }
-
-  private validateInput(
-    opts: IUpdateElectronAppOptions,
-    electronApp: typeof Electron.app
-  ) {
-    const pgkRepo = this.guessRepo(electronApp.getAppPath());
-
-    this.repo = opts?.repo || pgkRepo.repo;
-    this.user = opts?.user || pgkRepo.user;
-
-    this.updateInterval = opts?.updateInterval ?? "10 minutes";
-    this.notifyBeforeApply = opts?.notifyBeforeApply ?? true;
-    this.notifyBeforeDownload = opts?.notifyBeforeDownload ?? true;
-
-    assert(this.repo, "repo is required");
-
-    assert(
-      typeof this.updateInterval === "string" &&
-        this.updateInterval.match(/^\d+/),
-      "updateInterval must be a human-friendly string interval like `20 minutes`"
-    );
-
-    assert(
-      ms(this.updateInterval) >= 5 * 60 * 1000,
-      "updateInterval must be `5 minutes` or more"
-    );
   }
 
   private guessRepo(appPath: string) {
@@ -150,8 +141,57 @@ class InlineUpdaterClass {
     }
   }
 
+  private initUpdater() {
+    const electronUpdater = electron.autoUpdater;
+
+    this.checkForUpdates();
+    setInterval(() => {
+      this.checkForUpdates();
+    }, ms(this.options.updateInterval));
+
+    if (this.options.notifyBeforeApply) {
+      electronUpdater.on("update-downloaded", this.onUpdateDownloaded);
+    }
+
+    return true;
+  }
+
+  private async checkForUpdates() {
+    const electronUpdater = electron.autoUpdater;
+
+    if (this.pauseUpdates) return;
+
+    this.hasLatestVersion = await this.checkVersionDelta();
+
+    if (this.hasLatestVersion) {
+      console.log(`App has the lastest version(${this.fetchedVersion})`);
+      return;
+    }
+
+    console.log("UpdateUrl: ", this.downloadUrl);
+    electronUpdater.setFeedURL({ url: this.downloadUrl });
+
+    if (this.options.notifyBeforeDownload) {
+      this.promptDownload();
+    } else {
+      electronUpdater.checkForUpdates();
+    }
+  }
+
+  private async checkVersionDelta() {
+    const electronApp = electron.app;
+
+    this.downloadUrl = await this.fetchDownloadUrl();
+
+    if (!this.downloadUrl) {
+      return false;
+    }
+
+    return semver.gte(electronApp.getVersion(), this.fetchedVersion);
+  }
+
   private async fetchDownloadUrl() {
-    const apiUrl = `https://api.github.com/repos/${this.user}/${this.repo}/releases?per_page=100`;
+    const apiUrl = `https://api.github.com/repos/${this.options.user}/${this.options.repo}/releases?per_page=100`;
     const headers = { Accept: "application/vnd.github.preview" };
 
     try {
@@ -176,8 +216,8 @@ class InlineUpdaterClass {
 
         if (this.isAssetAvailable(release.assets)) {
           this.fetchedVersion = release.tag_name;
-          console.log("release.tag_name: ", release.tag_name);
-          return `https://github.com/${this.user}/${this.repo}/releases/download/${release.tag_name}`;
+          console.log("Latest release online: ", release.tag_name);
+          return `https://github.com/${this.options.user}/${this.options.repo}/releases/download/${release.tag_name}`;
         }
       }
     } catch (error: any) {
@@ -200,43 +240,6 @@ class InlineUpdaterClass {
       return assets.some((asset) => asset.name.includes("darwin"));
     }
     return false;
-  }
-
-  private initUpdater() {
-    const electronUpdater = electron.autoUpdater;
-
-    this.checkForUpdates();
-    setInterval(() => {
-      this.checkForUpdates();
-    }, ms(this.updateInterval));
-
-    if (this.notifyBeforeApply) {
-      electronUpdater.on("update-downloaded", this.onUpdateDownloaded);
-    }
-
-    return true;
-  }
-
-  private async checkForUpdates() {
-    const electronUpdater = electron.autoUpdater;
-
-    if (this.pauseUpdates) return;
-
-    this.hasLatestVersion = await this.checkVersionDelta();
-
-    if (this.hasLatestVersion) {
-      console.log(`App has the lastest version(${this.fetchedVersion})`);
-      return;
-    }
-
-    console.log("UpdateUrl: ", this.downloadUrl);
-    electronUpdater.setFeedURL({ url: this.downloadUrl });
-
-    if (this.notifyBeforeDownload) {
-      this.promptDownload();
-    } else {
-      electronUpdater.checkForUpdates();
-    }
   }
 
   private promptDownload() {
