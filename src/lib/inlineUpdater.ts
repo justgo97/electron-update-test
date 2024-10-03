@@ -17,6 +17,7 @@ interface IRelease {
   prerelease: number;
   tag_name: string;
   assets: IAsset[];
+  body: string;
 }
 
 interface IUpdateElectronAppOptions {
@@ -55,6 +56,7 @@ class InlineUpdaterClass {
   hasLatestVersion = true;
   fetchedVersion: string = "0.0.0";
   pauseUpdates: boolean;
+  releaseNotes: string;
   private downloadUrl: string;
   setupComplete: boolean;
 
@@ -228,6 +230,7 @@ class InlineUpdaterClass {
         if (this.isAssetAvailable(release.assets)) {
           this.fetchedVersion = release.tag_name;
           console.log("Latest release online: ", release.tag_name);
+          this.releaseNotes = release.body;
           return `https://github.com/${this.options.user}/${this.options.repo}/releases/download/${release.tag_name}`;
         }
       }
@@ -258,11 +261,10 @@ class InlineUpdaterClass {
 
     const dialogOpts: MessageBoxOptions = {
       type: "info",
-      buttons: ["Yes", "Later"],
+      buttons: ["Download update", "Later"],
       title: "Application Update",
       message: this.fetchedVersion,
-      detail:
-        "A new version can be downloaded. Would you like to start downloading in background?",
+      detail: `A new version have been released. Changes:\n${this.releaseNotes}`,
     };
 
     dialog.showMessageBox(dialogOpts).then(({ response }) => {
