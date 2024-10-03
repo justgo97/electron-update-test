@@ -49,8 +49,7 @@ interface IUpdateElectronAppOptions {
   readonly notifyBeforeDownload?: boolean;
 }
 
-//const supportedPlatforms = ["darwin", "win32"];
-const supportedPlatforms = ["win32"];
+const supportedPlatforms = ["darwin", "win32"];
 
 class InlineUpdaterClass {
   hasLatestVersion = true;
@@ -72,7 +71,7 @@ class InlineUpdaterClass {
     return true;
   }
 
-  private async onAppReady(opts?: IUpdateElectronAppOptions) {
+  private onAppReady(opts?: IUpdateElectronAppOptions) {
     const electronApp = electron.app;
 
     // check for bad input early, so it will be logged during development
@@ -92,13 +91,7 @@ class InlineUpdaterClass {
       return false;
     }
 
-    await this.checkVersionDelta();
-
-    if (this.notifyBeforeDownload) {
-      this.promptDownload();
-    } else {
-      this.initUpdater();
-    }
+    this.initUpdater();
   }
 
   private async checkVersionDelta() {
@@ -110,15 +103,7 @@ class InlineUpdaterClass {
       return false;
     }
 
-    this.hasLatestVersion = semver.gte(
-      electronApp.getVersion(),
-      this.fetchedVersion
-    );
-
-    if (this.hasLatestVersion) {
-      console.log(`App has the lastest version(${this.fetchedVersion})`);
-      return true;
-    }
+    return semver.gte(electronApp.getVersion(), this.fetchedVersion);
   }
 
   private validateInput(
@@ -130,10 +115,9 @@ class InlineUpdaterClass {
     this.repo = opts?.repo || pgkRepo.repo;
     this.user = opts?.user || pgkRepo.user;
 
-    this.updateInterval = opts?.updateInterval || "10 minutes";
-
-    this.notifyBeforeApply = opts?.notifyBeforeApply || true;
-    this.notifyBeforeDownload = opts?.notifyBeforeDownload || true;
+    this.updateInterval = opts?.updateInterval ?? "10 minutes";
+    this.notifyBeforeApply = opts?.notifyBeforeApply ?? true;
+    this.notifyBeforeDownload = opts?.notifyBeforeDownload ?? true;
 
     assert(this.repo, "repo is required");
 
@@ -179,11 +163,9 @@ class InlineUpdaterClass {
       }
 
       const data = await response.json();
-
       const releases: IRelease[] = Array.isArray(data) ? data : [data];
 
       for (const release of releases) {
-        // Validity checks
         if (
           !semver.valid(release.tag_name) ||
           release.draft ||
@@ -192,11 +174,7 @@ class InlineUpdaterClass {
           continue;
         }
 
-        const nupkgAsset = release.assets.find((asset) =>
-          asset.name.endsWith(".nupkg")
-        );
-
-        if (nupkgAsset) {
+        if (this.isAssetAvailable(release.assets)) {
           this.fetchedVersion = release.tag_name;
           console.log("release.tag_name: ", release.tag_name);
           return `https://github.com/${this.user}/${this.repo}/releases/download/${release.tag_name}`;
@@ -209,11 +187,61 @@ class InlineUpdaterClass {
         " latest release:",
         error.message
       );
-      return null; // Explicitly return null on error
+      throw new Error("Failed to fetch release information");
+    }
+    return null;
+  }
+
+  private isAssetAvailable(assets: IAsset[]) {
+    if (process.platform.includes("win32")) {
+      return assets.some((asset) => asset.name.endsWith(".nupkg"));
+    }
+    if (process.platform.includes("darwin")) {
+      return assets.some((asset) => asset.name.includes("darwin"));
+    }
+    return false;
+  }
+
+  private initUpdater() {
+    const electronUpdater = electron.autoUpdater;
+
+    this.checkForUpdates();
+    setInterval(() => {
+      this.checkForUpdates();
+    }, ms(this.updateInterval));
+
+    if (this.notifyBeforeApply) {
+      electronUpdater.on("update-downloaded", this.onUpdateDownloaded);
+    }
+
+    return true;
+  }
+
+  private async checkForUpdates() {
+    const electronUpdater = electron.autoUpdater;
+
+    if (this.pauseUpdates) return;
+
+    this.hasLatestVersion = await this.checkVersionDelta();
+
+    if (this.hasLatestVersion) {
+      console.log(`App has the lastest version(${this.fetchedVersion})`);
+      return;
+    }
+
+    console.log("UpdateUrl: ", this.downloadUrl);
+    electronUpdater.setFeedURL({ url: this.downloadUrl });
+
+    if (this.notifyBeforeDownload) {
+      this.promptDownload();
+    } else {
+      electronUpdater.checkForUpdates();
     }
   }
 
   private promptDownload() {
+    const electronUpdater = electron.autoUpdater;
+
     const dialogOpts: MessageBoxOptions = {
       type: "info",
       buttons: ["Yes", "Later"],
@@ -225,42 +253,11 @@ class InlineUpdaterClass {
 
     dialog.showMessageBox(dialogOpts).then(({ response }) => {
       if (response === 0) {
-        this.initUpdater();
+        electronUpdater.checkForUpdates();
       } else {
         this.pauseUpdates = true;
       }
     });
-  }
-
-  private initUpdater() {
-    const electronUpdater = electron.autoUpdater;
-    console.log("UpdateUrl: ", this.downloadUrl);
-
-    electronUpdater.setFeedURL({ url: this.downloadUrl });
-
-    if (this.pauseUpdates) return;
-
-    if (this.hasLatestVersion) {
-      return;
-    }
-
-    electronUpdater.checkForUpdates();
-    setInterval(() => {
-      if (this.pauseUpdates) return;
-
-      if (this.hasLatestVersion) {
-        this.checkVersionDelta();
-        return;
-      }
-
-      electronUpdater.checkForUpdates();
-    }, ms(this.updateInterval));
-
-    if (this.notifyBeforeApply) {
-      electronUpdater.on("update-downloaded", this.onUpdateDownloaded);
-    }
-
-    return true;
   }
 
   private onUpdateDownloaded = (
