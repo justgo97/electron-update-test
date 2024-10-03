@@ -7,7 +7,7 @@ if (require("electron-squirrel-startup")) {
   app.quit();
 }
 
-inlineUpdater.setup();
+inlineUpdater();
 
 const createWindow = (): void => {
   // Create the browser window.

@@ -56,6 +56,7 @@ class InlineUpdaterClass {
   fetchedVersion: string = "0.0.0";
   pauseUpdates: boolean;
   private downloadUrl: string;
+  setupComplete: boolean;
 
   options: IUpdateElectronAppOptions = {
     updateInterval: "10 minutes",
@@ -63,15 +64,25 @@ class InlineUpdaterClass {
     notifyBeforeDownload: true,
   };
 
+  constructor(opts?: IUpdateElectronAppOptions) {
+    if (opts) {
+      this.options = { ...opts };
+    }
+  }
+
   setup(opts?: IUpdateElectronAppOptions) {
+    if (this.setupComplete) {
+      throw new Error("inlineUpdater: Can't call the setup method twice.");
+    }
+
+    this.setupComplete = true;
+
     const electronApp = electron.app;
 
     this.validateInput(opts, electronApp);
 
     if (electronApp.isReady()) this.onAppReady();
     else electronApp.on("ready", () => this.onAppReady());
-
-    return true;
   }
 
   private validateInput(
@@ -291,8 +302,26 @@ class InlineUpdaterClass {
       if (response === 0) electron.autoUpdater.quitAndInstall();
     });
   };
+
+  getInstance(options?: IUpdateElectronAppOptions): InlineUpdaterClass {
+    if (options) {
+      this.options = { ...options };
+    }
+
+    if (!this.setupComplete) {
+      this.setup(this.options);
+    }
+    return this;
+  }
+
+  static createInstance(
+    options?: IUpdateElectronAppOptions
+  ): (options?: IUpdateElectronAppOptions | undefined) => InlineUpdaterClass {
+    const newClass = new InlineUpdaterClass(options);
+    return newClass.getInstance.bind(newClass);
+  }
 }
 
-const inlineUpdater = new InlineUpdaterClass();
+const inlineUpdater = InlineUpdaterClass.createInstance();
 
 export { inlineUpdater };
