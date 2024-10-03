@@ -132,7 +132,8 @@ class InlineUpdaterClass {
 
     this.updateInterval = opts?.updateInterval || "10 minutes";
 
-    this.notifyBeforeApply = opts?.notifyBeforeApply || false;
+    this.notifyBeforeApply = opts?.notifyBeforeApply || true;
+    this.notifyBeforeDownload = opts?.notifyBeforeDownload || true;
 
     assert(this.repo, "repo is required");
 
