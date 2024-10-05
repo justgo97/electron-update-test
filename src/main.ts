@@ -1,6 +1,6 @@
 import path from "path";
 import { app, BrowserWindow } from "electron";
-import { inlineUpdater } from "./lib/inlineUpdater";
+import { inlineUpdater } from "electron-inline-updater";
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require("electron-squirrel-startup")) {
