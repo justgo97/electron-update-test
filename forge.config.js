@@ -12,6 +12,7 @@ const config = {
   packagerConfig: {
     executableName: "electron-update-test",
     asar: false,
+    appVersion: "1.0.0",
   },
   rebuildConfig: {},
   makers: [
