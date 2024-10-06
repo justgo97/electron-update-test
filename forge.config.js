@@ -17,6 +17,8 @@ const config = {
   makers: [
     new MakerSquirrel({
       name: "electron-update-test",
+      noDelta: false,
+      remoteReleases: "https://github.com/justgo97/electron-update-test",
     }),
     new MakerZIP({}, ["darwin"]),
     new MakerRpm({}),
