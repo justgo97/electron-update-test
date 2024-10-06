@@ -1,7 +1,7 @@
 {
   "name": "electron-update-test",
   "productName": "electron-update-test",
-  "version": "0.0.25",
+  "version": "0.0.26",
   "repository": {
     "type": "git",
     "url": "https://github.com/justgo97/electron-update-test.git"
